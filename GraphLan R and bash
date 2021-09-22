@@ -1,0 +1,151 @@
+# 参数设置
+# 按丰度筛选，如0.01即代表0.01%，即万分之一
+abundance = 0.01
+# 按数量筛选，如150即代表最高丰度的150个特征
+number = 150
+
+# 读取输入文件
+otutab = read.table("otu_table.txt", sep="\t", header = TRUE, row.names = 1, stringsAsFactors = F, comment.char = "")
+taxonomy = read.table("taxonomy.txt", sep="\t", header = TRUE, row.names = 1, stringsAsFactors = F, comment.char = "")
+
+# 数据筛选
+# 标准化并求均值
+norm = as.data.frame(t(t(otutab)/colSums(otutab,na=T)*100))
+# 丰度由大到小排序
+idx = order(rowMeans(norm), decreasing = T)
+norm = norm[idx,]
+# 按丰度筛选
+idx = rowMeans(norm) > abundance
+filtered_otutab = norm[idx,]
+# 按数量筛选
+filtered_otutab = head(norm, number)
+# 添加均值并保留4位小数
+filtered_otutab = round(cbind(rowMeans(filtered_otutab), filtered_otutab), digits = 4)
+colnames(filtered_otutab)[1] = "Mean"
+# 对应过滤物种注释
+idx = rownames(filtered_otutab) %in% rownames(taxonomy)
+filtered_otutab = filtered_otutab[idx,]
+filtered_taxonomy = taxonomy[rownames(filtered_otutab),]
+
+# 保存输出文件
+# 过滤的OTU表
+write.table("OTUID\t", file="filtered_otutab.txt", append = F, sep="\t", quote=F, eol = "", row.names=F, col.names=F)
+suppressWarnings(write.table(filtered_otutab, file="filtered_otutab.txt", append = T, sep="\t", quote=F, row.names=T, col.names=T))
+# 过滤的物种注释
+write.table("OTUID\t", file="filtered_taxonomy.txt", append = F, sep="\t", quote=F, eol = "", row.names=F, col.names=F)
+suppressWarnings(write.table(filtered_taxonomy, file="filtered_taxonomy.txt", append = T, sep="\t", quote=F, row.names=T, col.names=T))
+
+
+
+# 读取筛选后的文件，不设置行名
+tax = read.table("filtered_taxonomy.txt", sep="\t", header = TRUE, stringsAsFactors = F)
+# 筛选门-属5级+OTUID
+tree = data.frame(tax[,c(3:7,1)], stringsAsFactors = F)
+# head(tree)
+## clarify taxonomy，解决不同级别重名问题，为可识别级别，且与Greengene格式保持一致
+tree[,1] = paste("p__",tree[,1],sep = "")
+tree[,2] = paste("c__",tree[,2],sep = "")
+tree[,3] = paste("o__",tree[,3],sep = "")
+# tree[,4] = paste("f__",tree[,4],sep = "")
+tree[,5] = paste("g__",tree[,5],sep = "")
+# save tree backbone, 按点分隔格式
+
+# 解决科标签重名问题
+idx = tree[,4] %in% "Unassigned"
+# 方法1. 重名标签添加数字编号，但结果有太多Unassigned
+# tree[idx,4] = paste0(tree[idx,4], 1:length(tree[idx,4]))
+# 方法2. 过滤掉科末注释的条目，数量会减少，但图片更美观
+tree = tree[!idx,]
+# 简化一些代_的不规则科名
+tree[,4] = gsub('_\\w*',"",tree[,4])
+write.table (tree, file="tree1_backbone.txt", sep=".", col.names=F, row.names=F, quote=F)
+
+# 列出现在有门、纲、目、科、属，用于设置与门对应的背景色
+Phylum = unique(tree[,1]) 
+Class = unique(tree[,2])
+Order = unique(tree[,3])
+Family = unique(tree[,4])
+Genus = unique(tree[,5])
+
+# 筛选四大菌门中的科并按门着色
+# 修改为目，则将tree的4列改为3列，Family改为Order
+pro = tree[tree[,1]=="p__Proteobacteria",4]
+act = tree[tree[,1]=="p__Actinobacteria",4] 
+bac = tree[tree[,1]=="p__Bacteroidetes",4]
+fir = tree[tree[,1]=="p__Firmicutes",4]
+
+# 对每个科进行标签、文字旋转、按门注释背景色
+# 也可调整为其它级别，如Order, Class或Genus
+label_color = data.frame(stringsAsFactors = F)
+for (element in Family)
+{
+  # element
+  anno = data.frame(stringsAsFactors = F)
+  anno[1,1] = element
+  anno[1,2] = "annotation"
+  anno[1,3] = "*"
+  # 设置文字旋转90度
+  anno[2,1] = element
+  anno[2,2] = "annotation_rotation"
+  anno[2,3] = "90"
+  # 设置背景色，四大门各指定一种色，其它为灰色
+  anno[3,1] = element
+  anno[3,2] = "annotation_background_color" 
+  
+  if (element %in% pro)
+  {
+    anno[3,3] = "#85F29B"
+  } else if (element %in% act)
+  {
+    anno[3,3] = "#F58D8D"   
+  } else if (element %in% fir)
+  {
+    anno[3,3] = "#F7C875"  
+  } else if (element %in% bac)
+  {
+    anno[3,3] = "#91DBF6"   
+  } else {
+    anno[3,3] = "grey"   
+  }
+  label_color = rbind(label_color,anno)
+}
+write.table(label_color, "tree2_label_color.txt", sep = "\t", quote = F,col.names = F,row.names = F, na="")
+
+
+# the following steps were finished on the bash
+
+cat cfg/global.cfg tree2_label_color.txt > track0
+
+cut -f 6 -d '.' tree1_backbone.txt > tree1_backbone.id
+
+awk 'BEGIN{OFS=FS="\t"} NR==FNR{a[$1]=$2} NR>FNR {print $1,a[$1]}' filtered_otutab-CeM.txt tree1_backbone.id > tree1_backbone.mean
+
+cat cfg/ring1.cfg <(awk '$2>0.5' tree1_backbone.mean | cut -f 1 | sed 's/$/\tring_shape\t1\tR/') > track1
+
+
+cat cfg/ring2.cfg <(awk '$2<=0.5' tree1_backbone.mean | cut -f 1 | sed 's/$/\tring_shape\t2\tv/') > track2
+
+
+
+awk 'BEGIN{OFS=FS="\t"} NR==FNR{a[$1]=$2} NR>FNR {print $1,a[$1]}' filtered_otutab-CeM-RT.txt tree1_backbone.id > tree1_backbone_RT.mean
+
+cat cfg/heat3.cfg <(sed 's/\t/\tring_alpha\t3\t/g' tree1_backbone_RT.mean) > track3
+
+
+
+awk 'BEGIN{OFS=FS="\t"} NR==FNR{a[$1]=$2} NR>FNR {print $1,a[$1]}' filtered_otutab-CeM-Cold.txt tree1_backbone.id > tree1_backbone_Cold.mean
+
+cat cfg/heat4.cfg <(sed 's/\t/\tring_alpha\t4\t/g' tree1_backbone_Cold.mean) > track4
+
+
+
+
+cat cfg/bar5.cfg <(sed 's/\t/\tring_height\t5\t/g' tree1_backbone.mean) > track5
+
+
+cat track* > graphlan_annotate.txt
+graphlan_annotate.py --annot graphlan_annotate.txt tree1_backbone.txt graphlan.xml
+graphlan.py graphlan.xml graphlan5_bar-CeM.pdf --size 5
+
+
+
