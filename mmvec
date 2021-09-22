@@ -1,3 +1,5 @@
+# reference： Morton JT, Aksenov AA, Nothias LF, Foulds JR, Quinn RA, Badri MH, et al. Learning representations of microbe-metabolite interactions. Nat Methods. 2019;16:1306.
+
 #  done in the qiime2
 
 pip install git+https://github.com/biocore/mmvec.git
