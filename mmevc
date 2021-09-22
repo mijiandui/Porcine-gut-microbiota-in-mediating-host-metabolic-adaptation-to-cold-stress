@@ -1,0 +1,204 @@
+#  done in the qiime2
+
+pip install git+https://github.com/biocore/mmvec.git
+qiime dev refresh-cache
+
+biom convert -i microbes.biom -o microbes-table.txt --to-tsv
+biom convert -i metabolites.biom -o metabolites-table.txt --to-tsv
+
+qiime tools export \
+  --input-path CeM-table.qza \
+  --output-path exported-feature-table-CeM
+
+qiime tools export --input-path taxonomy_si.qza --output-path exported-feature-table-CeM
+
+
+biom add-metadata -i exported-feature-table-CeM/feature-table.biom -o table-with-taxonomy.biom --observation-metadata-fp exported-feature-table/taxonomy.tsv --sc-separated taxonomy
+biom convert -i table-with-taxonomy.biom  -o feature-table.txt --to-tsv --table-type='OTU table' --header-key taxonomy
+
+
+
+
+
+
+
+
+
+
+
+biom convert -i CeC-NEG.txt -o CeC-NEG-metabolites.biom --table-type="OTU table" --to-hdf5
+
+
+
+qiime tools import \
+	--input-path CeC-NEG-metabolites.biom \
+	--output-path CeC-NEG-metabolites.qza \
+	--type FeatureTable[Frequency]
+
+
+qiime tools import \
+	--input-path CeC-table-microbiome.biom \
+	--output-path CeC-table-microbiome.qza \
+	--type FeatureTable[Frequency]
+
+
+qiime mmvec paired-omics --i-microbes CeC-table-microbiome.qza --i-metabolites CeC-NEG-metabolites.qza  --p-learning-rate 1e-3 --o-conditionals ranks.qza --o-conditional-biplot biplot.qza
+
+
+
+biom convert -i feature-table.txt -o CeC-table-microbiome.biom --table-type="OTU table" --to-hdf5
+
+biom convert -i otus_nt.biom -o otus_nt.biom.txt --to-tsv
+biom convert -i lcms_nt.biom -o lcms_nt.biom.txt --to-tsv
+
+
+
+
+
+
+
+
+qiime metadata tabulate \
+--m-input-file conditionals.qza \
+--o-visualization conditionals-viz.qzv
+
+
+qiime mmvec paired-omics --i-microbes CeC_OTU.qza --i-metabolites NEG.qza  --o-conditionals ranks.qza --o-conditional-biplot biplot.qz --p-batch-size 10 --p-min-feature-count 3 --p-num-testing-examples 1
+
+
+qiime emperor biplot \
+	--i-biplot biplot.qz.qza \
+	--m-sample-metadata-file metabolite-metadata.txt \
+	--m-feature-metadata-file microbe-metadata.txt \
+	--o-visualization emperor.qzv
+
+
+qiime mmvec heatmap \
+  --i-ranks ranks.qza \
+  --m-microbe-metadata-file microbe-metadata.txt \
+  --m-microbe-metadata-column Taxon \
+  --m-metabolite-metadata-file metabolite-metadata.txt \
+  --m-metabolite-metadata-column Compound_Name \
+  --p-level 5 \
+  --o-visualization ranks-heatmap.qzv
+
+qiime mmvec heatmap   --i-ranks ranks.qza --o-visualization ranks-heatmap.qzv
+
+
+qiime mmvec heatmap \
+  --i-ranks ranks.qza \
+  --m-microbe-metadata-file microbe-metadata.txt \
+  --m-microbe-metadata-column Taxon \
+  --p-level 5 \
+  --o-visualization ranks-heatmap5.qzv
+
+qiime mmvec heatmap \
+  --i-ranks ranks.qza \
+  --m-microbe-metadata-file microbe-metadata.txt \
+  --m-microbe-metadata-column Taxon \
+  --p-level 2 \
+  --o-visualization ranks-heatmap2.qzv
+
+
+
+
+
+
+
+#  plot in the R
+
+
+
+seq <- read_tsv("res_sequence.txt", col_names = TRUE)
+otu <- read_csv("feature-table_CeM.txt", col_names = TRUE)
+meta <- read_tsv("CeC-NEG.txt", col_names = TRUE)
+join<- otu %>% left_join(seq)
+
+write_tsv(join, "otu_table_with_sequence2.txt")
+
+otu <- read_tsv("otu_table_with_sequence2.txt", col_names = TRUE)
+micro_dif <- read_tsv("T vs Cold_cec-active-significance.tsv", col_names = TRUE)
+ranks<- read_csv("ranks.csv")
+join<- micro_dif  %>% left_join(ranks)
+join<-join  %>% left_join(otu)
+
+write_tsv(join, "ranks_with_different_microbiome.txt")
+
+
+meta_dif <- read_csv("meta_micro_diff.csv", col_names = TRUE)
+rank2<- read_tsv("T vs Cold_meta-active-significance.tsv")
+
+join<- rank2  %>% left_join(meta_dif)
+
+meta_name <- read_tsv("metabolite-metadata.txt", col_names = TRUE)
+join<- join  %>% left_join(meta_name)
+
+write_tsv(join, "ranks_with_different_microbiome and meta.txt")
+
+mi <- read_tsv("ordination3.txt", col_names = TRUE)
+mi<- mi  %>% left_join(otu)
+write_tsv(mi, "ordination3.txt")
+me <- read_tsv("ordination2.txt", col_names = TRUE)
+me2 <- read_tsv("ordination4.txt", col_names = TRUE)
+me2<- me2  %>% left_join(meta_name)
+me2<- me2  %>% left_join(meta)
+write_tsv(me2, "metabolites-samples.txt")
+label<- read_tsv("ordination5.txt", col_names = TRUE)
+library(ggplot2)
+
+
+
+
+p <- ggplot(mi, aes(x=PC1, y=PC2))+ geom_point()+
+ggplot(me, aes(x=PC1, y=PC2))+ geom_point()+geom_line(arrow = arrow())
+
+
+library(vegan)
+library(ggplot2)
+library(ggrepel)
+library(yyplot)
+
+
+ggplot() +
+  geom_point(data = me,aes(x=PC1,y=PC2),size=1, colour = "gray")+
+ # scale_shape_manual(values = c(21:25))+
+  #geom_ord_ellipse(aes(st$RDA1,st$RDA2,color=grp$group,group=grp$group),###注意，是在这里添加椭圆
+      #             ellipse_pro = 0.68,linetype=3,size=1)+###注意，是在这里添加椭圆
+  geom_segment(data = mi,aes(x = 0, y = 0, xend = PC1, yend = PC2,colour=mi$P), 
+                             arrow = arrow(angle=22.5,length = unit(0.35,"cm"),
+                             type = "closed"),linetype=1, size=0.5,
+               show.legend=FALSE
+               )+
+ #geom_text_repel(data = mi,aes(PC1,PC2,label=mi$S))+
+#  geom_text_repel(
+  #  data=me2,
+  #  aes(PC1,PC2,label = me2$Compound_Name),
+  #  size = 5,
+  #  box.padding = unit(0.35, "lines"),
+  #  point.padding = unit(0.3, "lines")
+ # )+
+  geom_label_repel(data = label,aes(PC1,PC2,label=label$S,fill=label$P),
+                   #aes(PC1,PC2,label=mi$S,fill=mi$P),
+                       color = "Black",
+                 #  nudge_x = ifelse(mi$S==6, 2, 0), nudge_y = ifelse(mi$S==6, 9, 0),
+                   #direction="y",
+                   force = 5,
+                # show_guide=FALSE,
+                   size = 4) +
+  #geom_segment(data = yz,aes(x = 0, y = 0, xend = RDA1, yend = RDA2), 
+   #            arrow = arrow(angle=22.5,length = unit(0.35,"cm"),
+   #                          type = "closed"),linetype=1, size=0.6,colour = "blue")+
+ # geom_text_repel(data = yz,aes(RDA1,RDA2,label=row.names(yz)))+
+  #labs(x=paste("RDA 1 (", format(100 *ii$cont[[1]][2,1], digits=4), "%)", sep=""),
+      # y=paste("RDA 2 (", format(100 *ii$cont[[1]][2,2], digits=4), "%)", sep=""))+
+  theme(legend.position=c(3, -2.5))+
+  geom_hline(yintercept=0,linetype=3,size=1) + 
+  geom_vline(xintercept=0,linetype=3,size=1)+
+  guides(shape=guide_legend(title=NULL),color=guide_legend(title=NULL),
+         fill=guide_legend(title=NULL))+
+  xlab("PC1(34.77%)")+
+  ylab("PC2(33.08%)")+
+   theme_bw()+theme(panel.grid=element_blank())
+
+
+ggsave("PCA-microbiome-metabolite.pdf",height=10, width=13, units='in', useDingbats=FALSE,dpi=600)
